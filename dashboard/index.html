@@ -9,9 +9,110 @@
 </head>
 <body>
 <a class="skip" href="#board">Skip to the board</a>
-<main id="board" tabindex="-1" aria-busy="true">
-  <p class="loading">Loading the radar…</p>
+
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <p class="brand-name">TOKEN RADAR</p>
+        <p class="brand-sub">Pre-token protocols, ranked by implied launch value</p>
+      </div>
+    </div>
+    <div class="topbar-meta" id="topbar-meta"></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="stats" id="stats" aria-label="Radar summary"></section>
+
+  <section class="controls" aria-label="Board controls">
+    <label class="ctl ctl-search">
+      <span>Search</span>
+      <input id="q" type="search" placeholder="Name or slug…" autocomplete="off">
+    </label>
+    <label class="ctl">
+      <span>Category</span>
+      <select id="cat"><option value="">All categories</option></select>
+    </label>
+    <label class="ctl">
+      <span>Chain</span>
+      <select id="chain"><option value="">All chains</option></select>
+    </label>
+    <div class="ctl ctl-kind" role="group" aria-label="Row kind">
+      <span>Show</span>
+      <div class="seg" id="kind-seg">
+        <button type="button" data-kind="" class="on">All rows</button>
+        <button type="button" data-kind="pre-token">Pre-token core</button>
+        <button type="button" data-kind="watchlist">Watchlist</button>
+        <button type="button" data-kind="product">Products</button>
+      </div>
+    </div>
+    <p class="ctl-count" id="count" aria-live="polite"></p>
+  </section>
+
+  <section id="board" class="board-card" aria-label="Ranked board">
+    <div class="table-scroll">
+      <table class="board">
+        <thead>
+          <tr>
+            <th class="num"><button type="button" class="sort" data-sort="rank">Rank</button></th>
+            <th><button type="button" class="sort" data-sort="name">Protocol</button></th>
+            <th>Category</th>
+            <th>Chains</th>
+            <th class="num"><button type="button" class="sort" data-sort="tvl_usd">TVL</button></th>
+            <th class="num"><button type="button" class="sort" data-sort="change_7d">7d</button></th>
+            <th class="num"><button type="button" class="sort" data-sort="age_days">Age</button></th>
+            <th class="num"><button type="button" class="sort" data-sort="implied_value_usd">Implied value</button></th>
+            <th class="num"><button type="button" class="sort" data-sort="effective">× TVL</button></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="board-note">Click a row for the full model breakdown and farm plan. ★ = on the snapshot watchlist (TVL at or above the floor, no token recorded). “Product” rows are bridges and liquid-staking / restaking / wrapped products of a token that already trades — ranked for their own possible governance token, badged so you can filter them out.</p>
+  </section>
+
+  <section class="method" aria-label="Methodology">
+    <h2>How the implied value is computed</h2>
+    <p>Every figure below comes from the sealed snapshot itself — no hand-kept list of names. A protocol enters the board when the snapshot records <strong>no token of its own</strong> for it (no market cap, no CoinGecko id, no symbol), except CEX records, which are exchanges rather than farmable protocols. Protocols whose token already trades are never ranked; they appear in the “already trading” list at the bottom with the market's own figures, and they are the calibration set for the model.</p>
+    <div class="formula" role="img" aria-label="Implied value equals TVL times category multiple times momentum times maturity times breadth">
+      <span class="f-main">implied = TVL × multiple × momentum × maturity × breadth</span>
+      <span class="f-sub">multiple = (n · median<sub>cat</sub> + 4 · median<sub>all</sub>) / (n + 4), clamped to [0.02, 2.5] — the median market-cap-to-TVL ratio of the category's live-token protocols, shrunk toward the snapshot-wide median by sample size n</span>
+      <span class="f-sub">momentum = 1 + 0.5 · tanh(change<sub>7d</sub> / 75) — damped, so a one-week spike cannot dominate; unreported growth counts as flat</span>
+      <span class="f-sub">maturity = 0.60 + 0.40 · ln(1 + age) / ln(1 + 1460) — time running with no token, saturating; unknown age counts as 270 days</span>
+      <span class="f-sub">breadth = 1 + 0.025 · min(chains − 1, 10) — a small premium per extra chain</span>
+    </div>
+    <h3>Category calibration — what the market pays per $1 of TVL</h3>
+    <div class="table-scroll">
+      <table class="cal">
+        <thead><tr><th>Category</th><th class="num">Live protocols (n)</th><th class="num">Raw median ×TVL</th><th class="num">Shrunk multiple used</th></tr></thead>
+        <tbody id="cal-rows"></tbody>
+      </table>
+    </div>
+    <p class="method-note" id="method-note"></p>
+  </section>
+
+  <section class="live" aria-label="Already trading">
+    <h2>Already trading — set aside, not ranked</h2>
+    <p class="live-sub">The largest protocols whose token already trades, with the market's own figures. They calibrate the multiples above; they are not farm targets on this board.</p>
+    <div class="table-scroll">
+      <table class="live-table">
+        <thead><tr><th>Protocol</th><th>Category</th><th class="num">Market cap</th><th class="num">TVL</th><th class="num">7d</th></tr></thead>
+        <tbody id="live-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot" id="foot"></footer>
 </main>
+
+<div class="overlay" id="overlay" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Protocol detail" hidden>
+  <button type="button" class="drawer-close" id="drawer-close" aria-label="Close detail">×</button>
+  <div id="drawer-body"></div>
+</aside>
+
 <noscript><p class="loading">Token Radar needs JavaScript: the board is rendered from data.js beside this page.</p></noscript>
 <script src="../data.js"></script>
 <script src="app.js"></script>
