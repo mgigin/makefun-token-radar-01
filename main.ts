@@ -1,9 +1,11 @@
-// Token Radar (token-radar-01 entry, Node 22, standard library only).
+// Token Radar v2 (token-radar-01 entry, Node 22, standard library only).
 //
-// Reads the sealed snapshot at /input/snapshot.json, scores every rankable pre-token protocol
-// with the model in lib/model.ts, writes the ranked board to /output/board.json and the
+// Reads the sealed snapshot at /input/snapshot.json, scores every protocol that records no
+// token with the model in lib/model.ts, writes the ranked board to /output/board.json and the
 // dashboard's data to /output/data.js, copies dashboard/ and screenshots/ into /output, and
-// finishes with /output/dossier.json from the vendored make.fun library.
+// finishes with /output/dossier.json from the vendored make.fun library. The board rows in
+// board.json carry the gate's fields; data.js carries the same rows plus the structured farm
+// plan the page renders, so the screenshots and the code agree by construction.
 //
 // Local run:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../kit/input/snapshot.json
@@ -11,7 +13,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
+import { boardIssue, buildRadar, dataScript, parseSnapshot, type BoardRow, type RadarRow } from './lib/model.ts';
 import { buildDossier } from './vendor/makefun-board.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -43,8 +45,28 @@ if (issue !== null) {
   process.exit(1);
 }
 
+/** A board.json row: the gate's fields, in a fixed key order so both runs write the same bytes. */
+function gateRow(r: RadarRow): BoardRow {
+  return {
+    rank: r.rank,
+    slug: r.slug,
+    name: r.name,
+    category: r.category,
+    chains: r.chains,
+    tvl_usd: r.tvl_usd,
+    change_7d: r.change_7d,
+    listed_at: r.listed_at,
+    age_days: r.age_days,
+    on_watchlist: r.on_watchlist,
+    kind: r.kind,
+    implied_value_usd: r.implied_value_usd,
+    model: r.model,
+    farm_steps: r.farm_steps,
+  };
+}
+
 mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
+writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board.map(gateRow) })}\n`);
 writeFileSync(join(out, 'data.js'), dataScript(radar));
 
 /** Copy one directory's regular files into `to`, skipping dot-names and subdirectories. */
@@ -63,6 +85,13 @@ function copyFiles(from: string, to: string): string[] {
 }
 
 const dash = copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
+// The dossier shows the dashboard's source whole only while it fits the text cap; refuse to
+// hand in a page the judge would read cut in half.
+const dashBytes = dash.reduce((sum, name) => sum + statSync(join(here, 'dashboard', name)).size, 0);
+if (dashBytes > TEXT_MAX_BYTES) {
+  process.stderr.write(`token radar: dashboard source is ${dashBytes} bytes, past the ${TEXT_MAX_BYTES}-byte dossier text cap: trim it\n`);
+  process.exit(1);
+}
 const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3 || shots.length > 4) {
   process.stderr.write(`token radar: screenshots/ holds ${shots.length} images: hand in 3 or 4 (board, detail view, filtered view)\n`);
@@ -82,6 +111,6 @@ writeFileSync(
 );
 
 process.stdout.write(
-  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows ranked (${radar.early_size} early), ${radar.live_size + radar.product_size} set aside as already trading\n` +
+  `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows ranked (${radar.core_size} pre-token core, ${radar.product_size} products, ${radar.early_size} below the floor)\n` +
     `token radar: wrote board.json, data.js, dashboard/ (${dash.length} files), screenshots/ (${shots.length} images) and dossier.json to ${out}\n`,
 );

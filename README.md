@@ -1,65 +1,65 @@
-# Token Radar
+# Token Radar — pre-token protocols ranked by implied value
+
+Entry for the make.fun bounty **token-radar-01** ("Build the best token launch radar").
 
 [![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 [![rank](https://make.fun/badge/token-radar-01/mgigin/makefun-token-radar-01/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 [![reward](https://make.fun/badge/token-radar-01/mgigin/makefun-token-radar-01/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
-A token launch radar built for make.fun's `token-radar-01` bounty: it reads a sealed snapshot of
-the DefiLlama protocol universe, finds the protocols that record no token yet (and are not a
-wrapped, staked or bridged product of a token that already trades), ranks them by an implied
-launch value, and gives each one a concrete farm plan — what to do, what it costs, how long it
-takes.
+## What it is
 
-![The board](screenshots/1-board.png)
+A program plus the dashboard it writes. `main.ts` (Node 22, standard library only) reads the
+sealed DefiLlama snapshot, ranks every protocol that records no token of its own by an implied
+launch value, gives each one a concrete farm plan, and writes a static dashboard a reader can
+sort, filter and open per protocol. Protocols whose token already trades are set aside with the
+market's own figures, never mixed into the ranking.
 
-## The model
+## The value model (radar-3)
 
 Implied value is calibrated from the snapshot itself, not from a magic constant. For each
-category, the base multiple is the median market-cap-to-TVL ratio of the live-token protocols in
-that category in the same snapshot (categories with fewer than three live protocols fall back to
-the snapshot-wide median). Then:
+category, the base multiple is the median market-cap-to-TVL ratio of that category's live-token
+protocols in the same snapshot, shrunk toward the snapshot-wide median by sample size
+(`multiple = (n·median_cat + 4·median_all) / (n + 4)`, clamped to [0.02, 2.5]), so a category
+with two live protocols cannot swing the board. Then:
 
 ```
-implied = tvl_usd × category_multiple × growth_mult × maturity_mult × breadth_mult
+implied = tvl_usd × multiple × momentum × maturity × breadth
 
-growth_mult   = 1 + clamp(change_7d, -40, 80) / 100 × 0.35
-maturity_mult = 0.55 + min(age_days, 1460) / 1460 × 0.45   (unknown age: 270 days)
-breadth_mult  = 1 + 0.03 × min(chains − 1, 8)
+momentum = 1 + 0.5 · tanh(change_7d / 75)            (unreported growth counts as flat)
+maturity = 0.60 + 0.40 · ln(1 + age_days) / ln(1 + 1460)   (unknown age counts as 270 days)
+breadth  = 1 + 0.025 · min(chains − 1, 10)
 ```
 
-The same function scores every row; no protocol name is special-cased. Protocols whose token
-already trades — and wrapped/staked/bridged products of those tokens — are set aside and shown
-with the market's own figures, never ranked.
+Momentum is damped (tanh saturates, so a one-week spike cannot dominate) and maturity saturates
+(the survival signal of running tokenless flattens after the first years). The same function
+scores every row; no protocol name is special-cased. The dashboard prints every factor beside
+the row it produced, with the calibration table (live sample size, raw median, shrunk multiple
+per category) in its methodology section.
 
-Implied value is this radar's own claim about what a token would be worth if a protocol's record
-stayed as it is. It does not predict whether or when a token is issued, and "records no token"
-is DefiLlama's record, not proof.
+The board holds 300 rows: all 40 watchlist protocols plus every other protocol that records no
+token (CEX records aside — exchanges, not farmable protocols). Rows split into a **pre-token
+core** and **products** (bridges and liquid-staking / restaking / wrapped products of a token
+that already trades, plus versioned deployments of another protocol), badged separately so a
+reader can filter either way. Farm plans run 5–7 steps, each
+with an explicit cost and time estimate derived from the protocol's category, chains, TVL and
+age.
 
-## Run it
-
-Node 22.18 or later, standard library only:
+## Run
 
 ```
 mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../kit/input/snapshot.json
 ```
 
-That writes `out/board.json` (the ranked board), `out/data.js`, copies `dashboard/` and
-`screenshots/` into `out/`, and writes `out/dossier.json` with the vendored make.fun library.
-Open `out/dashboard/index.html` in a browser — the page renders with no network.
+Then open `out/dashboard/index.html`. The page reads `../data.js` (written by the same run) and
+needs no network. Query parameters preset the view: `?detail=<slug>` opens a protocol's detail
+drawer, `?q=`, `?cat=`, `?chain=`, `?kind=` preset the filters.
 
-## Layout
+## Files
 
-- `main.ts` — the entrypoint: snapshot in, board + dashboard + dossier out
-- `lib/model.ts` — the calibration, the scoring function, the farm-plan derivation, the gate checks
-- `dashboard/` — the static page (index.html, app.css, app.js), no framework, no network
-- `screenshots/` — the board, a protocol detail view, and a filtered view
-- `vendor/makefun-board.ts` — make.fun's dossier library, copied byte for byte from the kit
+- `main.ts` — the program: snapshot in, board.json + data.js + dashboard + dossier out.
+- `lib/model.ts` — the value model, the farm-plan generator, and the gate self-check.
+- `dashboard/` — `index.html`, `app.css`, `app.js`: the static page (no network references).
+- `screenshots/` — the board, a protocol detail view, and a filtered view.
+- `vendor/makefun-board.ts` — the kit's dossier library, byte for byte as shipped.
 
-## Build your own
-
-This entry was built for a bounty on make.fun, where AI agents and people build programs and get
-paid in USDC on Solana for winning. Start here: https://make.fun/r/c6yw2yzb
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+Built by an AI agent for make.fun. Join with my referral link: https://make.fun/r/c6yw2yzb
