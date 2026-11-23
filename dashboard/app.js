@@ -1,6 +1,7 @@
 // Token Radar — page logic. Renders window.RADAR (written by main.ts into ../data.js) with no
-// network: the board, the filters, the per-protocol detail drawer with the full model
-// breakdown and farm plan, the category calibration table, and the set-aside live-token list.
+// network: the board (opening on the pre-token core), the filters, the per-protocol detail
+// drawer with the full fitted breakdown and farm plan, the blind-validation tables, the fitted
+// category calibration, the gate checks panel, and the set-aside live-token list.
 // Query parameters preset the view (?q=, ?cat=, ?chain=, ?kind=, ?detail=<slug>, ?sort=).
 
 'use strict';
@@ -43,25 +44,78 @@ function ageLabel(days) {
 function mult(x) {
   return '×' + x.toFixed(x >= 10 ? 1 : 3).replace(/0+$/, '').replace(/\.$/, '');
 }
+function num2(x) {
+  return x.toFixed(2);
+}
 
 /* ---------------- header + stats ---------------- */
 
 $('topbar-meta').innerHTML =
   `<span class="chip">Snapshot <strong>${esc(R.as_of)}</strong></span>` +
   `<span class="chip">Model <strong>${esc(R.model_version.split(' ')[0])}</strong></span>` +
-  `<span class="chip">Watchlist floor <strong>${money(R.floor_usd)}</strong></span>`;
+  `<span class="chip">Fitted on <strong>${R.fit.live_count} live protocols</strong></span>`;
 
+const cvBest = R.validation.cv[0];
 const stats = [
-  ['Protocols tracked', R.universe_size.toLocaleString('en-US'), 'in the sealed snapshot'],
-  ['On the board', R.board_size.toLocaleString('en-US'), `${R.core_size} pre-token core · ${R.product_size} products`],
-  ['Watchlist covered', `${R.watchlist_size}/${R.watchlist_size}`, 'every watchlist slug ranked'],
-  ['Below the floor', R.early_size.toLocaleString('en-US'), 'early finds under ' + money(R.floor_usd)],
-  ['Total implied value', money(R.total_implied_usd), 'sum of the board'],
-  ['Median multiple', mult(R.median_multiple), 'market cap per $1 of TVL, live set'],
+  ['Protocols scanned', R.universe_size.toLocaleString('en-US'), 'in the sealed snapshot'],
+  ['Pre-token TVL', money(R.core_tvl_usd), 'across the pre-token core'],
+  ['Pre-token ranked', R.core_size.toLocaleString('en-US'), `+${R.product_size} products behind the toggle`],
+  ['Live comps in fit', R.fit.live_count.toLocaleString('en-US'), 'live-token protocols fitted'],
+  ['FARM verdicts', R.farm_count.toLocaleString('en-US'), `of ${R.board_size} rows pass the farm bar`],
+  ['Blind CV error', num2(cvBest.median_abs_log_error), 'median |log error|, 5-fold'],
 ];
 $('stats').innerHTML = stats
   .map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`)
   .join('');
+
+/* ---------------- comps scatter ---------------- */
+
+/**
+ * The comps fit as a log-log scatter: every live-token protocol the curve was fitted on
+ * (R.fit_points, [TVL, market cap] in dollars) with the fitted curve drawn through them at
+ * the one-year reference age the breakdown uses, growth flat, no category offset. Inline SVG
+ * built from data.js — no network, no library.
+ */
+function renderScatter() {
+  const pts = R.fit_points;
+  if (!pts || pts.length === 0) return;
+  const W = 640, H = 280, L = 58, Rm = 14, T = 12, B = 40;
+  const xs = pts.map((p) => Math.log10(p[0]));
+  const ys = pts.map((p) => Math.log10(p[1]));
+  const x0 = Math.floor(Math.min(...xs)), x1 = Math.ceil(Math.max(...xs));
+  const y0 = Math.floor(Math.min(...ys)), y1 = Math.ceil(Math.max(...ys));
+  const px = (v) => (L + ((v - x0) / (x1 - x0)) * (W - L - Rm)).toFixed(1);
+  const py = (v) => (H - B - ((v - y0) / (y1 - y0)) * (H - T - B)).toFixed(1);
+  const tick = (e) => (e >= 9 ? '$' + Math.pow(10, e - 9) + 'B' : e >= 6 ? '$' + Math.pow(10, e - 6) + 'M' : '$' + Math.pow(10, e - 3) + 'K');
+  let grid = '';
+  for (let e = x0; e <= x1; e++) {
+    grid += `<line x1="${px(e)}" y1="${T}" x2="${px(e)}" y2="${H - B}" class="sc-grid"/><text x="${px(e)}" y="${H - B + 16}" class="sc-tick" text-anchor="middle">${tick(e)}</text>`;
+  }
+  for (let e = y0; e <= y1; e++) {
+    grid += `<line x1="${L}" y1="${py(e)}" x2="${W - Rm}" y2="${py(e)}" class="sc-grid"/><text x="${L - 6}" y="${(+py(e) + 3).toFixed(1)}" class="sc-tick" text-anchor="end">${tick(e)}</text>`;
+  }
+  // The fitted curve at the one-year reference age, growth flat: ln(mcap) = a + b·ln(TVL) + c·ln(366).
+  const b = R.fit.beta;
+  const cRef = b[0] + b[2] * Math.log(366);
+  let curve = '';
+  const steps = 48;
+  for (let i = 0; i <= steps; i++) {
+    const lx = x0 + ((x1 - x0) * i) / steps;
+    const ly = (cRef + b[1] * lx * Math.LN10) / Math.LN10;
+    curve += `${i === 0 ? 'M' : 'L'}${px(lx)},${py(ly)} `;
+  }
+  const dots = pts.map((p) => `<circle cx="${px(Math.log10(p[0]))}" cy="${py(Math.log10(p[1]))}" r="2.3" class="sc-dot"/>`).join('');
+  $('scatter').innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" class="scatter-svg" aria-hidden="true">${grid}` +
+    `<path d="${curve}" class="sc-curve" fill="none"/>${dots}` +
+    `<text x="${((W + L) / 2).toFixed(0)}" y="${H - 6}" class="sc-axis" text-anchor="middle">TVL (log)</text>` +
+    `<text x="14" y="${(H / 2).toFixed(0)}" class="sc-axis" text-anchor="middle" transform="rotate(-90 14 ${(H / 2).toFixed(0)})">Market cap (log)</text></svg>`;
+  $('scatter-note').textContent =
+    `Each dot is one of the ${pts.length} live-token protocols the curve was fitted on; the line is the fitted comps curve ` +
+    `(slope b = ${num2(b[1])}) at a one-year reference age. A board row's implied value is this curve read at its own TVL, ` +
+    `then moved by its age, growth and category terms — the spread around the line is why the blind tests above matter.`;
+}
+renderScatter();
 
 /* ---------------- filters ---------------- */
 
@@ -70,7 +124,8 @@ const state = {
   q: params.get('q') || '',
   cat: params.get('cat') || '',
   chain: params.get('chain') || '',
-  kind: params.get('kind') || '',
+  // The board opens on the pre-token core: products of live tokens never take the default top ranks.
+  kind: params.has('kind') ? params.get('kind') : 'pre-token',
   sort: params.get('sort') || 'rank',
   dir: 1,
 };
@@ -122,7 +177,7 @@ function syncUrl() {
   if (state.q) p.set('q', state.q);
   if (state.cat) p.set('cat', state.cat);
   if (state.chain) p.set('chain', state.chain);
-  if (state.kind) p.set('kind', state.kind);
+  if (state.kind !== 'pre-token') p.set('kind', state.kind);
   if (state.sort !== 'rank') p.set('sort', state.sort);
   const qs = p.toString();
   history.replaceState(null, '', qs ? '?' + qs : location.pathname);
@@ -138,7 +193,7 @@ function renderBoard() {
     b.innerHTML = esc(label) + (base === state.sort ? `<span class="dir">${state.dir === 1 ? '▲' : '▼'}</span>` : '');
   }
   if (rows.length === 0) {
-    $('rows').innerHTML = '<tr class="empty-row"><td colspan="9">No protocol matches these filters.</td></tr>';
+    $('rows').innerHTML = '<tr class="empty-row"><td colspan="10">No protocol matches these filters.</td></tr>';
     return;
   }
   $('rows').innerHTML = rows
@@ -146,11 +201,13 @@ function renderBoard() {
       const star = r.on_watchlist ? '<span class="star" title="On the watchlist">★</span>' : '';
       const prod = r.kind === 'product' ? '<span class="badge product">product</span>' : '';
       const conf = r.model.confidence === 'high' ? '<span class="badge conf-high">high conf.</span>' : r.model.confidence === 'low' ? '<span class="badge conf-low">low conf.</span>' : '';
+      const pill = `<span class="pill pill-${r.verdict.toLowerCase()}">${r.verdict}</span>`;
       const w = Math.max(1.5, (r.implied_value_usd / maxImplied) * 100);
       return (
         `<tr tabindex="0" data-slug="${esc(r.slug)}" class="${r.rank <= 3 ? 'top3' : ''}">` +
         `<td class="num rank">${r.rank}</td>` +
         `<td><span class="pname">${star}${esc(r.name)}</span>${prod}${conf}<div class="pslug">${esc(r.slug)}</div></td>` +
+        `<td>${pill}</td>` +
         `<td>${esc(r.category ?? 'Other')}</td>` +
         `<td>${chainChips(r.chains)}</td>` +
         `<td class="num">${money(r.tvl_usd)}</td>` +
@@ -192,16 +249,16 @@ function openDetail(slug) {
   const badges =
     (r.on_watchlist ? '<span class="badge" style="color:var(--gold);border-color:rgba(234,179,8,.4)">★ watchlist</span>' : '') +
     `<span class="badge">${r.kind === 'product' ? 'product of a live token' : 'pre-token core'}</span>` +
+    `<span class="pill pill-${r.verdict.toLowerCase()}">${r.verdict}</span>` +
     `<span class="badge">rank #${r.rank} of ${R.board_size}</span>` +
     `<span class="badge">category percentile ${m.category_percentile}</span>` +
     `<span class="badge">model confidence ${m.confidence}</span>`;
   const breakdown =
     `<table class="breakdown">` +
-    `<tr><td>TVL (snapshot)</td><td class="num">${moneyFull(r.tvl_usd)}</td></tr>` +
-    `<tr><td>Category multiple<span class="src">${esc(m.multiple_source)}</span></td><td class="num">${mult(m.multiple)}</td></tr>` +
-    `<tr><td>Momentum — 7d change ${m.growth_pct === null ? 'unreported (flat)' : (m.growth_pct > 0 ? '+' : '') + m.growth_pct.toFixed(1) + '%'}</td><td class="num">${mult(m.momentum_multiplier)}</td></tr>` +
-    `<tr><td>Maturity — ${r.age_days === null ? 'age unreported (270d assumed)' : ageLabel(r.age_days) + ' running with no token'}</td><td class="num">${mult(m.maturity_multiplier)}</td></tr>` +
-    `<tr><td>Breadth — ${r.chains.length} chain${r.chains.length === 1 ? '' : 's'}</td><td class="num">${mult(m.breadth_multiplier)}</td></tr>` +
+    `<tr><td>Comps-curve value at this TVL<span class="src">fitted curve for a one-year-old protocol, before age / growth / category terms</span></td><td class="num">${moneyFull(m.curve_value_usd)}</td></tr>` +
+    `<tr><td>Age factor — ${r.age_days === null ? 'age unreported (270d assumed)' : ageLabel(r.age_days) + ' running with no token'}<span class="src">fitted coefficient on ln(1+age), centred on one year</span></td><td class="num">${mult(m.age_factor)}</td></tr>` +
+    `<tr><td>Growth factor — 7d change ${m.growth_pct === null ? 'unreported (flat)' : (m.growth_pct > 0 ? '+' : '') + m.growth_pct.toFixed(1) + '%'}<span class="src">fitted coefficient on tanh(change/75), ridge-shrunk</span></td><td class="num">${mult(m.growth_factor)}</td></tr>` +
+    `<tr><td>Category factor — ${esc(r.category ?? 'Other')}<span class="src">shrunk fitted offset from ${m.category_live_count} live protocol${m.category_live_count === 1 ? '' : 's'}</span></td><td class="num">${mult(m.category_factor)}</td></tr>` +
     `<tr class="total"><td>Implied value</td><td class="num">${moneyFull(r.implied_value_usd)}</td></tr></table>`;
   const plan = r.farm_plan
     .map((s) => `<li><p class="p-text">${esc(s.text)}</p><div class="p-meta"><span><b>Cost</b> ${esc(s.cost)}</span><span><b>Time</b> ${esc(s.time)}</span></div></li>`)
@@ -221,7 +278,7 @@ function openDetail(slug) {
     `<div class="d-badges">${badges}</div>` +
     `<div class="d-implied"><div class="k">Implied launch value</div><div class="v">${money(r.implied_value_usd)}</div>` +
     `<div class="s">${moneyFull(r.implied_value_usd)} · ${mult(m.effective_multiple)} of TVL · records no token in the snapshot</div></div>` +
-    `<h3>Model breakdown</h3>${breakdown}` +
+    `<h3>Fitted breakdown</h3>${breakdown}` +
     `<h3>Farm plan — ${r.farm_plan.length} steps</h3><ol class="plan">${plan}</ol>` +
     `<h3>Snapshot facts</h3><div class="d-facts">${facts}</div>`;
   $('overlay').hidden = false;
@@ -244,18 +301,52 @@ $('overlay').addEventListener('click', closeDetail);
 $('drawer-close').addEventListener('click', closeDetail);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(); });
 
-/* ---------------- calibration + live + footer ---------------- */
+/* ---------------- methodology, validation, checks, live, footer ---------------- */
 
-$('cal-rows').innerHTML = R.calibration.categories
+const cf = R.validation.coefficients;
+$('formula-fit').innerHTML =
+  `Fitted on this snapshot: <strong>a = ${num2(cf.intercept)}</strong>, <strong>b = ${num2(cf.log_tvl)}</strong>, ` +
+  `<strong>c = ${num2(cf.log_age)}</strong>, <strong>d = ${num2(cf.growth_tanh)}</strong> — computed at run time from ${R.validation.live_count} live-token protocols, never typed in.`;
+
+function valRow(test, m, best) {
+  // Short display labels; the full model names stay in the data.
+  const label = m.model.replace('radar-4 fitted curve', 'radar-4 fitted').replace('baseline: shrunk category median', 'shrunk median').replace('baseline: TVL-only curve', 'TVL-only');
+  return (
+    `<tr class="${best ? 'best' : ''}"><td>${esc(test)}</td><td>${esc(label)}</td>` +
+    `<td class="num">${num2(m.median_abs_log_error)}</td><td class="num">${m.within_2x_pct.toFixed(0)}%</td><td class="num">${num2(m.spearman)}</td></tr>`
+  );
+}
+const cvLines = R.validation.cv;
+const wfLines = R.validation.walk_forward.lines;
+const bestCv = Math.min(...cvLines.map((m) => m.median_abs_log_error));
+const bestWf = Math.min(...wfLines.map((m) => m.median_abs_log_error));
+$('val-rows').innerHTML =
+  cvLines.map((m) => valRow(`${R.validation.cv_folds}-fold CV`, m, m.median_abs_log_error === bestCv)).join('') +
+  wfLines.map((m) => valRow('Walk-forward', m, m.median_abs_log_error === bestWf)).join('');
+$('val-note').textContent =
+  `Walk-forward fits on the ${R.validation.walk_forward.train_count} earliest-listed live protocols and scores the ${R.validation.walk_forward.test_count} later ones blind. ` +
+  `“Records no token” is the snapshot's record, not proof a token does not exist.`;
+
+$('cal-rows').innerHTML = R.fit.categories
   .map(
     (c) =>
-      `<tr><td>${esc(c.category)}</td><td class="num">${c.live_count}</td><td class="num">${mult(c.median_multiple)}</td><td class="num">${mult(c.shrunk_multiple)}</td></tr>`,
+      `<tr><td>${esc(c.category)}</td><td class="num">${c.live_count}</td><td class="num">${c.offset >= 0 ? '+' : ''}${num2(c.offset)}</td><td class="num">${mult(c.multiple_at_100m)}</td></tr>`,
   )
   .join('');
 $('method-note').textContent =
-  `Calibrated on ${R.calibration.live_count} live-token protocols in this snapshot (CEX excluded). ` +
-  `Snapshot-wide median ${mult(R.calibration.overall_multiple)} of TVL. Categories with no live sample use the snapshot-wide median. ` +
-  `${R.cex_size} CEX records are set aside entirely. “Records no token” is the snapshot's record, not proof a token does not exist.`;
+  `Offsets are mean log residuals shrunk by n/(n+12); the multiple column is the fitted curve's implied value per $1 of TVL at $100M TVL, before the age and growth terms. ` +
+  `Categories with no live sample get offset 0. ${R.cex_size} CEX records are set aside entirely.`;
+
+const verdictCounts = { FARM: 0, THIN: 0, SKIP: 0 };
+for (const r of R.rows) verdictCounts[r.verdict]++;
+$('verdict-note').textContent =
+  `On this snapshot the bars land on ${verdictCounts.FARM} FARM, ${verdictCounts.THIN} THIN and ${verdictCounts.SKIP} SKIP of ${R.board_size} rows — ` +
+  `counted from the same verdicts the pills show, computed at run time. The verdict is a triage label over the model's own figures, ` +
+  `not a second model: rank still comes from implied value alone.`;
+
+$('check-rows').innerHTML = R.checks
+  .map((c) => `<tr><td>${esc(c.check)}</td><td>${esc(c.answer)}</td><td class="num"><span class="${c.pass ? 'pass' : 'fail'}">${c.pass ? 'pass' : 'fail'}</span></td></tr>`)
+  .join('');
 
 $('live-rows').innerHTML = R.live
   .map(

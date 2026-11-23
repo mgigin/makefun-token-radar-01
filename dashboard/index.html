@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar — pre-token protocols ranked by implied value</title>
-<meta name="description" content="A radar for protocols that record no token yet: ranked by an implied value calibrated from the snapshot's own live-token market, each with a concrete farm plan.">
+<title>Token Radar — pre-token protocols ranked by fitted implied value</title>
+<meta name="description" content="A radar for protocols that record no token yet: ranked by an implied value from a comps curve fitted on the snapshot's own live-token market and tested blind, each with a concrete farm plan.">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -16,7 +16,7 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <div>
         <p class="brand-name">TOKEN RADAR</p>
-        <p class="brand-sub">Pre-token protocols, ranked by implied launch value</p>
+        <p class="brand-sub">Pre-token protocols, ranked by fitted implied launch value</p>
       </div>
     </div>
     <div class="topbar-meta" id="topbar-meta"></div>
@@ -25,6 +25,25 @@
 
 <main class="wrap">
   <section class="stats" id="stats" aria-label="Radar summary"></section>
+
+  <section class="model-band" aria-label="Comps fit and blind validation">
+    <div class="band-card">
+      <h2>The comps fit — the live-token market</h2>
+      <div id="scatter" role="img" aria-label="Log-log scatter of market cap against TVL for the live-token protocols the curve was fitted on, with the fitted curve drawn through them"></div>
+      <p class="band-note" id="scatter-note"></p>
+    </div>
+    <div class="band-card">
+      <h2>Blind validation — does the curve predict market caps it never saw?</h2>
+      <p class="method-sub">Two blind tests, computed at run time from the same snapshot: <strong>5-fold cross-validation</strong> (folds fixed by slug order) and a <strong>walk-forward</strong> split — fit on earlier-listed protocols, score later ones. Each test also scores two baselines. Median |log error| of 0.69 ≈ a typical miss of 2×.</p>
+      <div class="table-scroll">
+        <table class="cal">
+          <thead><tr><th>Test</th><th>Model</th><th class="num">Median |log error|</th><th class="num">Within 2×</th><th class="num">Spearman ρ</th></tr></thead>
+          <tbody id="val-rows"></tbody>
+        </table>
+      </div>
+      <p class="method-note" id="val-note"></p>
+    </div>
+  </section>
 
   <section class="controls" aria-label="Board controls">
     <label class="ctl ctl-search">
@@ -42,8 +61,8 @@
     <div class="ctl ctl-kind" role="group" aria-label="Row kind">
       <span>Show</span>
       <div class="seg" id="kind-seg">
-        <button type="button" data-kind="" class="on">All rows</button>
-        <button type="button" data-kind="pre-token">Pre-token core</button>
+        <button type="button" data-kind="pre-token" class="on">Pre-token core</button>
+        <button type="button" data-kind="">All rows</button>
         <button type="button" data-kind="watchlist">Watchlist</button>
         <button type="button" data-kind="product">Products</button>
       </div>
@@ -58,6 +77,7 @@
           <tr>
             <th class="num"><button type="button" class="sort" data-sort="rank">Rank</button></th>
             <th><button type="button" class="sort" data-sort="name">Protocol</button></th>
+            <th>Verdict</th>
             <th>Category</th>
             <th>Chains</th>
             <th class="num"><button type="button" class="sort" data-sort="tvl_usd">TVL</button></th>
@@ -70,32 +90,45 @@
         <tbody id="rows"></tbody>
       </table>
     </div>
-    <p class="board-note">Click a row for the full model breakdown and farm plan. ★ = on the snapshot watchlist (TVL at or above the floor, no token recorded). “Product” rows are bridges and liquid-staking / restaking / wrapped products of a token that already trades — ranked for their own possible governance token, badged so you can filter them out.</p>
+    <p class="board-note">The board opens on the <strong>pre-token core</strong>: protocols that record no token and are not a wrapped, staked or bridged product of one that already trades. Products (bridges, liquid staking / restaking, wrapped assets, versioned deployments) sit behind the “Products” toggle — ranked by the same model, never in the default top ranks. Each row's <strong>verdict</strong> (FARM / THIN / SKIP) comes from the stated bars in the methodology below. Click a row for the full fitted breakdown and farm plan. ★ = on the snapshot watchlist.</p>
   </section>
 
-  <section class="method" aria-label="Methodology">
-    <h2>How the implied value is computed</h2>
-    <p>Every figure below comes from the sealed snapshot itself — no hand-kept list of names. A protocol enters the board when the snapshot records <strong>no token of its own</strong> for it (no market cap, no CoinGecko id, no symbol), except CEX records, which are exchanges rather than farmable protocols. Protocols whose token already trades are never ranked; they appear in the “already trading” list at the bottom with the market's own figures, and they are the calibration set for the model.</p>
-    <div class="formula" role="img" aria-label="Implied value equals TVL times category multiple times momentum times maturity times breadth">
-      <span class="f-main">implied = TVL × multiple × momentum × maturity × breadth</span>
-      <span class="f-sub">multiple = (n · median<sub>cat</sub> + 4 · median<sub>all</sub>) / (n + 4), clamped to [0.02, 2.5] — the median market-cap-to-TVL ratio of the category's live-token protocols, shrunk toward the snapshot-wide median by sample size n</span>
-      <span class="f-sub">momentum = 1 + 0.5 · tanh(change<sub>7d</sub> / 75) — damped, so a one-week spike cannot dominate; unreported growth counts as flat</span>
-      <span class="f-sub">maturity = 0.60 + 0.40 · ln(1 + age) / ln(1 + 1460) — time running with no token, saturating; unknown age counts as 270 days</span>
-      <span class="f-sub">breadth = 1 + 0.025 · min(chains − 1, 10) — a small premium per extra chain</span>
+  <section class="method" aria-label="Methodology and validation">
+    <h2>The value model — fitted on this snapshot, tested blind</h2>
+    <p>Every figure below is computed from the sealed snapshot itself at run time — no hand-kept list of names, no typed-in constants. A protocol enters the board when the snapshot records <strong>no token of its own</strong> for it (no market cap, no CoinGecko id, no symbol), except CEX records, which are exchanges rather than farmable protocols. Protocols whose token already trades are never ranked; they are the fitting set, and they appear in the “already trading” list at the bottom with the market's own figures.</p>
+    <div class="formula" role="img" aria-label="Log of market cap equals a plus b times log of TVL plus c times log of one plus age plus d times tanh of seven day growth over 75, plus a shrunk category offset">
+      <span class="f-main" id="formula-main">ln(mcap) = a + b·ln(TVL) + c·ln(1+age) + d·tanh(change<sub>7d</sub>/75) + category offset</span>
+      <span class="f-sub" id="formula-fit"></span>
+      <span class="f-sub">Fitted by ridge regression (λ = 30 on every term but the intercept) on the snapshot's live-token protocols. The slope b &lt; 1 is the comps curve: the market pays a falling multiple as TVL grows, so implied value grows sublinearly with TVL. Category offsets are mean residuals shrunk by n/(n+12), so a one-protocol category cannot swing the board. Missing age counts as 270 days; unreported growth counts as flat.</span>
     </div>
-    <h3>Category calibration — what the market pays per $1 of TVL</h3>
+
+    <h3>Category calibration — fitted offsets</h3>
     <div class="table-scroll">
       <table class="cal">
-        <thead><tr><th>Category</th><th class="num">Live protocols (n)</th><th class="num">Raw median ×TVL</th><th class="num">Shrunk multiple used</th></tr></thead>
+        <thead><tr><th>Category</th><th class="num">Live protocols (n)</th><th class="num">Fitted offset (log)</th><th class="num">Curve multiple at $100M TVL</th></tr></thead>
         <tbody id="cal-rows"></tbody>
       </table>
     </div>
     <p class="method-note" id="method-note"></p>
+
+    <h3>Verdicts — FARM, THIN, SKIP</h3>
+    <p class="method-sub">Every row carries a verdict from stated bars on the snapshot's own figures — the same figures the model scores, no separate judgement. <strong>FARM</strong>: a pre-token core protocol the fitted curve values at <strong>$10M or more</strong>, not in freefall (7-day change at or above <strong>−10%</strong>, or unreported), running at least a <strong>full quarter</strong> with no token (age 90+ days, or unreported), with medium-or-better model confidence. <strong>SKIP</strong>: TVL in freefall (7-day change below <strong>−15%</strong>), one of the smallest launches on the board (implied value under <strong>$3M</strong>), or a product of a live token valued under <strong>$5M</strong>. Everything else is <strong>THIN</strong> — farmable, but the case is thinner. Products cap at THIN: for a bridge or a liquid-staking receipt, the token that might still come is the speculative part, so the board never calls one a straight farm.</p>
+    <p class="method-note" id="verdict-note"></p>
+  </section>
+
+  <section class="checks" aria-label="Gate checks">
+    <h2>Checks — the gate's questions, answered by this run</h2>
+    <div class="table-scroll">
+      <table class="cal">
+        <thead><tr><th>Check</th><th>Answer</th><th class="num">Pass</th></tr></thead>
+        <tbody id="check-rows"></tbody>
+      </table>
+    </div>
   </section>
 
   <section class="live" aria-label="Already trading">
     <h2>Already trading — set aside, not ranked</h2>
-    <p class="live-sub">The largest protocols whose token already trades, with the market's own figures. They calibrate the multiples above; they are not farm targets on this board.</p>
+    <p class="live-sub">The largest protocols whose token already trades, with the market's own figures. They fit the curve above; they are not farm targets on this board.</p>
     <div class="table-scroll">
       <table class="live-table">
         <thead><tr><th>Protocol</th><th>Category</th><th class="num">Market cap</th><th class="num">TVL</th><th class="num">7d</th></tr></thead>
