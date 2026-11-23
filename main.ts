@@ -1,11 +1,11 @@
-// Token Radar v2 (token-radar-01 entry, Node 22, standard library only).
+// Token Radar v3 (token-radar-01 entry, Node 22, standard library only).
 //
-// Reads the sealed snapshot at /input/snapshot.json, scores every protocol that records no
-// token with the model in lib/model.ts, writes the ranked board to /output/board.json and the
-// dashboard's data to /output/data.js, copies dashboard/ and screenshots/ into /output, and
-// finishes with /output/dossier.json from the vendored make.fun library. The board rows in
-// board.json carry the gate's fields; data.js carries the same rows plus the structured farm
-// plan the page renders, so the screenshots and the code agree by construction.
+// Reads the sealed snapshot at /input/snapshot.json, fits the value model in lib/model.ts on
+// the snapshot's own live-token protocols, validates it blind (5-fold CV and a walk-forward
+// split), ranks every protocol that records no token, and writes /output/board.json plus the
+// dashboard's data to /output/data.js. It then copies dashboard/ and screenshots/ into
+// /output and finishes with /output/dossier.json from the vendored make.fun library, so the
+// screenshots, the board and the code agree by construction.
 //
 // Local run:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../kit/input/snapshot.json
@@ -42,6 +42,11 @@ const { board, radar } = buildRadar(snapshot);
 const issue = boardIssue(board, snapshot);
 if (issue !== null) {
   process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);
+  process.exit(1);
+}
+const failedChecks = radar.checks.filter((c) => !c.pass);
+if (failedChecks.length > 0) {
+  process.stderr.write(`token radar: gate checks failed: ${failedChecks.map((c) => c.check).join(', ')}\n`);
   process.exit(1);
 }
 
@@ -102,6 +107,11 @@ for (const name of shots) {
     process.stderr.write(`token radar: screenshots/${name}: a name is letters, digits and . _ -, 1 to 128 characters\n`);
     process.exit(1);
   }
+  const bytes = statSync(join(here, 'screenshots', name)).size;
+  if (bytes > SCREENSHOT_CAPS.max_bytes) {
+    process.stderr.write(`token radar: screenshots/${name} is ${bytes} bytes, past the ${SCREENSHOT_CAPS.max_bytes}-byte cap: re-export it smaller\n`);
+    process.exit(1);
+  }
 }
 
 // The dossier is written last: the scorer rebuilds it from /output and compares bytes.
@@ -110,7 +120,9 @@ writeFileSync(
   buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: { max_files: 400, max_bytes: 4_194_304 } }),
 );
 
+const cv = radar.validation.cv[0]!;
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows ranked (${radar.core_size} pre-token core, ${radar.product_size} products, ${radar.early_size} below the floor)\n` +
+    `token radar: fitted on ${radar.fit.live_count} live protocols, slope ${radar.validation.coefficients.log_tvl}; blind 5-fold CV median |log error| ${cv.median_abs_log_error}, ${cv.within_2x_pct}% within 2x, Spearman ${cv.spearman}\n` +
     `token radar: wrote board.json, data.js, dashboard/ (${dash.length} files), screenshots/ (${shots.length} images) and dossier.json to ${out}\n`,
 );
